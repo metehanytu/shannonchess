@@ -1,0 +1,226 @@
+<html><head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>chessboardjs Example #1001 - Start Position</title>
+    <base href="../">
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css" integrity="sha384-q94+BZtLrkL1/ohfjR8c6L+A6qzNH9R2hBLwyoAfu3i/WCvQjzL2RQJ3uNHDISdU" crossorigin="anonymous">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js" integrity="sha512-5nNBISa4noe7B2/Me0iHkkt7mUvXG9xYoeXuSrr8OmCQIxd5+Qwxhjy4npBLIuxGNQKwew/9fEup/f2SUVkkXg==" crossorigin="anonymous" referrerpolicy="no-referrer" type="module"></script>
+<body>
+<div id="myBoard" style="width: 400px"></div>
+<label>Status:</label>
+<div id="status"></div>
+<label>FEN:</label>
+<div id="fen"></div>
+<label>PGN:</label>
+<div id="pgn"></div>
+<script src="js/jquery-3.4.1.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js" integrity="sha384-8Vi8VHwn3vjQ9eUHUxex3JSN/NFqUg3QbPyX8kWyb93+8AC/pPWTzj+nHtbC5bxD" crossorigin="anonymous"></script>
+<script type="module">
+  import { Chess } from 'https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js';
+  // NOTE: this example uses the chess.js library:
+  // https://github.com/jhlywa/chess.js
+
+  function evaluateFen(fen) {
+    const g = new Chess(fen);
+    const board = g.board();
+    const count = { w:{k:0,q:0,r:0,b:0,n:0,p:0}, b:{k:0,q:0,r:0,b:0,n:0,p:0} };
+// dosyalara göre piyon sayıları
+    const pawns = { w: Array(8).fill(0), b: Array(8).fill(0) };
+    board.forEach((row, r) => row.forEach((sq, c) => {
+      if (!sq) return;
+      count[sq.color][sq.type]++;
+      if (sq.type === 'p') pawns[sq.color][c]++;
+    }));
+// D (doubled)
+    const doubled = color => pawns[color].reduce((a,x)=> a + Math.max(0,x-1), 0);
+// I (isolated)
+    const isolated = color => pawns[color].reduce((a,x,i)=>{
+      if (x===0) return a;
+      const left = i>0 ? pawns[color][i-1] : 0;
+      const right = i<7 ? pawns[color][i+1] : 0;
+      return a + (left===0 && right===0 ? x : 0);
+    },0);
+// S (backward) — kaba yaklaşım: komşu dosyalarda daha ileri piyon yoksa geri say.
+    function backward(color){
+      let total=0; const dir = color==='w' ? -1 : 1; // tahta dizini 0 üstte
+      for (let file=0; file<8; file++){
+// o dosyadaki piyon satırlarını bul
+        for (let rank=0; rank<8; rank++){
+          const sq = board[rank][file];
+          if (!sq || sq.type!=='p' || sq.color!==color) continue;
+          const ahead = (f)=>{
+            for (let rr=rank+dir; rr>=0 && rr<8; rr+=dir){
+              const s = board[rr][f];
+              if (s && s.type==='p' && s.color===color) return true;
+            }
+            return false;
+          };
+          const leftAhead = file>0 ? ahead(file-1) : false;
+          const rightAhead = file<7 ? ahead(file+1) : false;
+          if (!leftAhead && !rightAhead) total++;
+        }
+      }
+      return total;
+    }
+// Mobility M, M' (White ve Black için)
+    const parts = fen.split(' ');
+    const fenW = [parts[0],'w',...parts.slice(2)].join(' ');
+    const fenB = [parts[0],'b',...parts.slice(2)].join(' ');
+    const gW = new Chess(fenW); const gB = new Chess(fenB);
+    const Mw = gW.moves().length; const Mb = gB.moves().length;
+
+
+    const material = 200*(count.w.k-count.b.k) + 9*(count.w.q-count.b.q) + 5*(count.w.r-count.b.r) + 3*((count.w.b-count.b.b) + (count.w.n-count.b.n)) + (count.w.p-count.b.p);
+    const struct = -0.5*((doubled('w')-doubled('b')) + (backward('w')-backward('b')) + (isolated('w')-isolated('b')));
+    const mobility = 0.1*(Mw - Mb);
+    return material + struct + mobility;
+  }
+
+  var board = null
+  var game = new Chess()
+  var $status = $('#status')
+  var $fen = $('#fen')
+  var $pgn = $('#pgn')
+
+  function onDragStart (source, piece, position, orientation) {
+    // do not pick up pieces if the game is over
+    if (game.game_over()) return false
+
+    // only pick up pieces for the side to move
+    if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+      (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+      return false
+    }
+  }
+
+  function onDrop (source, target) {
+    // see if the move is legal
+    var move = game.move({
+      from: source,
+      to: target,
+      promotion: 'q' // NOTE: always promote to a queen for example simplicity
+    })
+
+    // illegal move
+    if (move === null) return 'snapback'
+
+    updateStatus()
+  }
+
+  // update the board position after the piece snap
+  // for castling, en passant, pawn promotion
+  function onSnapEnd () {
+    board.position(game.fen())
+  }
+
+  function updateStatus () {
+    var status = ''
+    var moveColor = 'White'
+    if (game.turn() === 'b') {
+      moveColor = 'Black'
+    }
+
+    // checkmate?
+    if (game.in_checkmate()) {
+      status = 'Game over, ' + moveColor + ' is in checkmate.'
+    }
+
+    // draw?
+    else if (game.in_draw()) {
+      status = 'Game over, drawn position'
+    }
+    // game still on
+    else {
+      status = moveColor + ' to move'
+
+      if (game.turn() === 'b') {
+        // Tüm legal hamleleri deneyip f(P)'yi min eden seçici
+        let best = null, bestScore = Infinity;
+        const legalMoves = game.moves({ verbose: true });
+        const MATE = 1e9; // mate skor sabiti
+        for (const m of legalMoves) {
+          const tmp = new Chess(game.fen());
+          tmp.move({ from: m.from, to: m.to, promotion: 'q' });
+
+          // Black hamlesinden SONRA oyun bittiyse değerlendir
+          if (tmp.game_over()) {
+            let score;
+            if (tmp.in_checkmate()) {
+              // Sıra White'ta ve checkmate => Black mat etmiş
+              score = -MATE; // Black için mükemmel (White skoru çok kötü)
+            } else {
+              // Berabere vs.
+              score = 0;
+            }
+
+            if (score < bestScore) {
+              bestScore = score;
+              best = { from: m.from, to: m.to, promotion: 'q' };
+            }
+            continue;
+          }
+
+          // ----- 2. kat: White'ın en iyi cevabını (White için maksimum) bul -----
+          let whitesBest = Number.NEGATIVE_INFINITY;
+          const whiteReplies = tmp.moves({ verbose: true });
+
+          // White her cevabı dener (Black için en kötü olanı seçeriz)
+          for (const r of whiteReplies) {
+            const tmp2 = new Chess(tmp.fen());
+            tmp2.move({ from: r.from, to: r.to, promotion: 'q' });
+
+            let sc;
+            if (tmp2.game_over()) {
+              if (tmp2.in_checkmate()) {
+                // Sıra Black'te ve checkmate => White mat etmiş
+                sc = +MATE; // White için mükemmel
+              } else {
+                sc = 0; // berabere
+              }
+            } else {
+              sc = evaluateFen(tmp2.fen()); // White açısından pozisyon skoru
+            }
+
+            if (sc > whitesBest) whitesBest = sc;
+
+            // Basit alfa-beta tarzı erken kesme (opsiyonel ama hızlı):
+            // Black bu hamlede en az whitesBest kadar kötüye katlanacak,
+            // eğer bu, şu ana kadarki bestScore'dan zaten daha kötüyse, devam etmeye gerek yok.
+            if (whitesBest >= bestScore) break;
+          }
+
+          // Black, White'ın en iyi cevabına göre oluşan skoru minimize eder
+          if (whitesBest < bestScore) {
+            bestScore = whitesBest;
+            best = { from: m.from, to: m.to, promotion: 'q' };
+          }
+        }
+        game.move(best);
+
+      }
+      // check?
+      if (game.in_check()) {
+        status += ', ' + moveColor + ' is in check'
+      }
+    }
+
+    $status.html(status)
+    $fen.html(game.fen())
+    $pgn.html(game.pgn())
+  }
+
+  var config = {
+    draggable: true,
+    position: 'start',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd
+  }
+  board = Chessboard('myBoard', config)
+
+
+  updateStatus()
+</script>
+
+</body>
+</html>
